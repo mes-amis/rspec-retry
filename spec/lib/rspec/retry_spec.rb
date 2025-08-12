@@ -66,13 +66,14 @@ describe RSpec::Retry do
     end
 
     context 'with :retry => 0' do
-      after(:all) { @@this_ran_once = nil }
+      shared_state = { ran_once: false }
+      
       it 'should still run once', retry: 0 do
-        @@this_ran_once = true
+        shared_state[:ran_once] = true
       end
 
       it 'should run have run once' do
-        expect(@@this_ran_once).to be true
+        expect(shared_state[:ran_once]).to be true
       end
     end
 
@@ -333,15 +334,13 @@ describe RSpec::Retry do
   end
 
   describe 'Example::Procsy#attempts' do
-    let!(:example_group) do
-      RSpec.describe do
-        before :all do
-          @@results = {}
-        end
-
+    it 'should be exposed' do
+      results = {}
+      
+      example_group = RSpec.describe do
         around do |example|
           example.run_with_retry
-          @@results[example.description] = [example.exception.nil?, example.attempts]
+          results[example.description] = [example.exception.nil?, example.attempts]
         end
 
         specify 'without retry option' do
@@ -352,11 +351,9 @@ describe RSpec::Retry do
           expect(true).to be(false)
         end
       end
-    end
-
-    it 'should be exposed' do
+      
       example_group.run
-      expect(example_group.class_variable_get(:@@results)).to eq({
+      expect(results).to eq({
         'without retry option' => [true, 1],
         'with retry option' => [false, 3]
       })
@@ -401,6 +398,110 @@ describe RSpec::Retry do
         |
         | RSpec::Retry: 2nd try ./spec/lib/rspec/retry_spec.rb:#{line_2}
       STRING
+    end
+  end
+
+  describe 'max_retries configuration' do
+    before(:all) do
+      RSpec::Retry.reset_retried_examples_count
+      RSpec.configuration.max_retries = 1  # Allow only 1 example to be retried
+    end
+
+    after(:all) do
+      RSpec.configuration.max_retries = false  # reset to default
+    end
+
+    context 'when max_retries limit is reached' do
+      it 'should stop retrying examples after max_retries limit is reached' do
+        RSpec::Retry.reset_retried_examples_count
+        RSpec.configuration.max_retries = 1  # Force set the limit
+        attempt_counts = []
+        
+        example_group = RSpec.describe 'MaxRetriesTest' do
+          around do |example|
+            example.run_with_retry
+            attempt_counts << example.attempts
+          end
+
+          it 'first failing example', retry: 3 do
+            raise 'first failure'
+          end
+
+          it 'second failing example', retry: 3 do
+            raise 'second failure'
+          end
+
+          it 'third failing example', retry: 3 do
+            raise 'third failure'  # This should not retry due to max_retries limit
+          end
+        end
+        
+        example_group.run
+        
+        # With max_retries = 1, only first example should be retried to its full count
+        # Second and third examples should not be retried at all (attempts = 1)
+        expect(attempt_counts).to eq([3, 1, 1])  # First retries fully, second and third fail immediately
+      end
+    end
+
+    context 'when under max_retries limit' do
+      it 'should retry both examples when under max_retries limit' do
+        RSpec::Retry.reset_retried_examples_count
+        attempt_counts = []
+
+        example_group = RSpec.describe 'UnderLimitTest' do
+          around do |example|
+            example.run_with_retry
+            attempt_counts << example.attempts
+          end
+
+          it 'first failing example', retry: 2 do
+            raise 'failure'
+          end
+
+          it 'second failing example', retry: 2 do
+            raise 'failure'
+          end
+        end
+        
+        example_group.run
+        expect(attempt_counts).to eq([2, 2])  # Both examples should retry fully
+      end
+    end
+
+    context 'default max_retries value' do
+      it 'should have a default value of false' do
+        # Reset to default
+        RSpec.configure { |config| config.max_retries = false }
+        expect(RSpec.configuration.max_retries).to eq(false)
+      end
+    end
+
+    context 'when max_retries is false' do
+      it 'should ignore the max_retries feature completely' do
+        RSpec::Retry.reset_retried_examples_count
+        RSpec.configuration.max_retries = false
+        attempt_counts = []
+
+        example_group = RSpec.describe 'IgnoredMaxRetriesTest' do
+          around do |example|
+            example.run_with_retry
+            attempt_counts << example.attempts
+          end
+
+          # Create many examples that will retry
+          (1..15).each do |i|
+            it "example #{i}", retry: 2 do
+              raise "failure #{i}"
+            end
+          end
+        end
+        
+        example_group.run
+        
+        # All 15 examples should retry fully since max_retries is disabled
+        expect(attempt_counts).to eq([2] * 15)
+      end
     end
   end
 end

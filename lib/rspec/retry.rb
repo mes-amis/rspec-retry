@@ -1,9 +1,16 @@
 require 'rspec/core'
 require 'rspec/retry/version'
 require 'rspec_ext/rspec_ext'
+require 'set'
 
 module RSpec
   class Retry
+    @@retried_examples = Set.new
+
+    def self.reset_retried_examples_count
+      @@retried_examples = Set.new
+    end
+
     def self.setup
       RSpec.configure do |config|
         config.add_setting :verbose_retry, :default => false
@@ -12,6 +19,7 @@ module RSpec
         config.add_setting :exponential_backoff, :default => false
         config.add_setting :clear_lets_on_failure, :default => true
         config.add_setting :display_try_failure_messages, :default => false
+        config.add_setting :max_retries, :default => false
 
         # retry based on example metadata
         config.add_setting :retry_count_condition, :default => ->(_) { nil }
@@ -36,6 +44,10 @@ module RSpec
         config.around(:each) do |ex|
           ex.run_with_retry
         end
+        
+        config.before(:context) do
+          RSpec::Retry.reset_retried_examples_count
+        end
       end
     end
 
@@ -52,7 +64,7 @@ module RSpec
     end
 
     def retry_count
-      [
+      original_count = [
           (
           ENV['RSPEC_RETRY_RETRY_COUNT'] ||
               ex.metadata[:retry] ||
@@ -61,6 +73,17 @@ module RSpec
           ).to_i,
           1
       ].max
+      
+      # Check if we've hit the global max_retries limit
+      max_retries = RSpec.configuration.max_retries
+      if max_retries.is_a?(Integer) && original_count > 1
+        example_id = current_example.object_id
+        if !@@retried_examples.include?(example_id) && @@retried_examples.size >= max_retries
+          return 1  # No retries allowed
+        end
+      end
+      
+      original_count
     end
 
     def attempts
@@ -128,6 +151,18 @@ module RSpec
         break if example.exception.nil?
 
         example.metadata[:retry_exceptions] << example.exception
+
+        # Check if we've reached the global max_retries limit
+        max_retries = RSpec.configuration.max_retries
+        if max_retries.is_a?(Integer)
+          example_id = example.object_id
+          unless @@retried_examples.include?(example_id)
+            if @@retried_examples.size >= max_retries
+              break
+            end
+            @@retried_examples.add(example_id)
+          end
+        end
 
         break if attempts >= retry_count
 
