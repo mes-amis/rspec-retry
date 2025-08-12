@@ -2,11 +2,7 @@ require 'rspec'
 require 'rspec/core/sandbox'
 
 require 'rspec/retry'
-if Gem::Version.new(RUBY_VERSION) < Gem::Version.new('2')
-  require "pry-debugger"
-else
-  require "pry-byebug"
-end
+require "pry"
 
 RSpec.configure do |config|
   config.verbose_retry = true
