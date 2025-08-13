@@ -1,4 +1,4 @@
-# RSpec::Retry ![Build Status](https://secure.travis-ci.org/NoRedInk/rspec-retry.svg?branch=master)
+# RSpec::Retry ![CI](https://github.com/NoRedInk/rspec-retry/actions/workflows/ci.yml/badge.svg)
 
 RSpec::Retry adds a ``:retry`` option for intermittently failing rspec examples.
 If an example has the ``:retry`` option, rspec will retry the example the
@@ -50,6 +50,14 @@ RSpec.configure do |config|
   # show exception that triggers a retry if verbose_retry is set to true
   config.display_try_failure_messages = true
 
+  # limit retries in CI to prevent long build times
+  config.max_retries = ENV['CI'] ? 10 : false
+  
+  # skip retries for integration tests (they should be reliable)
+  config.skip_retry_if = proc do |example|
+    example.metadata[:integration] == true
+  end
+
   # run retry only on features
   config.around :each, :js do |ex|
     ex.run_with_retry retry: 3
@@ -80,6 +88,129 @@ end
 # RSpec::Retry: 3rd try ./spec/lib/random_spec.rb:49
 ```
 
+### Global Retry Limits
+
+You can set a global limit on how many examples are allowed to retry during a test run:
+
+```ruby
+RSpec.configure do |config|
+  # Only allow 5 examples to retry during the entire test run
+  config.max_retries = 5
+end
+
+# Examples that would normally retry will fail immediately once the limit is reached
+it 'first flaky test', :retry => 3 do
+  # This will retry up to 3 times if it fails
+end
+
+it 'another flaky test', :retry => 2 do  
+  # This will retry if the global limit hasn't been reached
+end
+# ... after 5 examples have been retried, subsequent failing examples won't retry
+```
+
+### Conditional Retry Skipping
+
+You can skip retries for specific examples based on custom conditions:
+
+```ruby
+RSpec.configure do |config|
+  # Skip retries for integration tests
+  config.skip_retry_if = proc do |example|
+    example.description.match?(/integration/)
+  end
+end
+
+it 'unit test', :retry => 3 do
+  # This will retry on failure
+end
+
+it 'integration test', :retry => 3 do
+  # This will NOT retry due to skip_retry_if condition
+end
+```
+
+```ruby
+RSpec.configure do |config|
+  # Skip retries based on example metadata
+  config.skip_retry_if = proc do |example|
+    example.metadata[:no_retry] == true ||
+    example.metadata[:type] == :integration
+  end
+end
+
+it 'normal test', :retry => 2 do
+  # Will retry on failure
+end
+
+it 'marked test', :retry => 2, :no_retry => true do  
+  # Will NOT retry due to metadata
+end
+
+it 'integration test', :retry => 2, :type => :integration do
+  # Will NOT retry due to type metadata  
+end
+```
+
+### Combining Features
+
+You can use both `max_retries` and `skip_retry_if` together for fine-grained control:
+
+```ruby
+RSpec.configure do |config|
+  # Global limit of 3 retried examples
+  config.max_retries = 3
+  
+  # Skip retries for smoke tests (they should be reliable)
+  config.skip_retry_if = proc do |example|
+    example.metadata[:smoke] == true
+  end
+end
+
+it 'flaky unit test', :retry => 2 do
+  # Will retry and count towards max_retries limit
+end
+
+it 'smoke test', :retry => 2, :smoke => true do
+  # Will NOT retry due to skip_retry_if (doesn't count towards limit)
+end
+
+# After 3 examples have been retried, subsequent examples won't retry
+it 'another test', :retry => 2 do
+  # May not retry if max_retries limit is reached
+end
+```
+
+### Practical Use Cases
+
+**Limiting retries in CI environments:**
+```ruby
+RSpec.configure do |config|
+  # In CI, limit total retries to prevent long build times
+  config.max_retries = ENV['CI'] ? 5 : false
+end
+```
+
+**Skip retries for specific test types:**
+```ruby
+RSpec.configure do |config|
+  # Don't retry screenshot comparison tests (they're either right or wrong)
+  config.skip_retry_if = proc do |example|
+    example.metadata[:screenshot] == true
+  end
+end
+```
+
+**Environment-specific retry behavior:**
+```ruby
+RSpec.configure do |config|
+  # Skip retries in development, allow in CI
+  config.skip_retry_if = proc do |example|
+    !ENV['CI'] && example.metadata[:flaky] == true
+  end
+end
+```
+
 ### Calling `run_with_retry` programmatically
 
 You can call `ex.run_with_retry(opts)` on an individual example.
@@ -94,6 +225,8 @@ You can call `ex.run_with_retry(opts)` on an individual example.
 - __:exceptions_to_hard_fail__(default: *[]*) List of exceptions that will trigger an immediate test failure without retry. Takes precedence over __:exceptions_to_retry__
 - __:exceptions_to_retry__(default: *[]*) List of exceptions that will trigger a retry (when empty, all exceptions will)
 - __:retry_callback__(default: *nil*) Callback function to be called between retries
+- __:max_retries__(default: *false*) Global limit on the number of examples that can be retried. When disabled (false), there's no limit. When set to an integer, only that many examples will be allowed to retry during the entire test run
+- __:skip_retry_if__(default: *nil*) Proc that takes an example as an argument. If it returns true, the example will not be retried even if it has a retry count configured
 
 
 ## Environment Variables
