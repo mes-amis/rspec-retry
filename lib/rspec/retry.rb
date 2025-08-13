@@ -74,7 +74,7 @@ module RSpec
           ).to_i,
           1
       ].max
-      
+
       # Check if we should skip retry based on skip_retry_if proc
       skip_retry_if = RSpec.configuration.skip_retry_if
       if skip_retry_if.is_a?(Proc) && original_count > 1
@@ -91,7 +91,7 @@ module RSpec
           return 1  # No retries allowed
         end
       end
-      
+
       original_count
     end
 
