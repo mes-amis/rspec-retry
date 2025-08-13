@@ -153,6 +153,61 @@ it 'integration test', :retry => 2, :type => :integration do
 end
 ```
 
+**Simple flaky test marking:**
+```ruby
+RSpec.configure do |config|
+  # Skip retries for manually marked flaky tests
+  config.skip_retry_if = proc do |example|
+    example.metadata[:flaky] == true
+  end
+end
+
+# Mark specific tests as flaky
+it 'processes payment', :retry => 3, :flaky => true do
+  # This test won't retry even though retry: 3 is set
+  # because it's marked as flaky
+end
+
+it 'stable test', :retry => 3 do  
+  # This test will retry normally
+end
+```
+
+**Advanced flaky test tracking integration:**
+```ruby
+RSpec.configure do |config|
+  config.max_retries = 10
+  
+  # Load known flaky specs from external tracking system
+  FLAKY_SPECS ||= RSpec::Flakes.flaky_specs
+  
+  # Only retry system tests with JS in CI
+  config.around :each, type: :system, js: true do |ex|
+    ex.run_with_retry retry: 2
+  end if ENV['CI']
+  
+  # Skip retries for tests that are known to be flaky
+  # This prevents wasting time on tests that fail due to known issues
+  config.skip_retry_if = proc do |example|
+    metadata = example.metadata
+    
+    # Check if this test matches any known flaky spec
+    FLAKY_SPECS.any? do |flaky_spec|
+      metadata[:file_path].include?(flaky_spec['file']) &&
+        example.full_description == flaky_spec['test_name']
+    end
+  end
+  
+  config.retry_callback = ->(ex) { Capybara.reset! if ex.metadata[:js] }
+end
+```
+
+These conditional skipping approaches are useful for:
+- **Basic matching**: Skip retries by test description patterns
+- **Metadata-based**: Use RSpec metadata for fine-grained control  
+- **Simple flaky marking**: Manually mark problematic tests to skip retries
+- **Advanced tracking**: Integration with external flaky test management systems
+
 ### Combining Features
 
 You can use both `max_retries` and `skip_retry_if` together for fine-grained control:
@@ -211,61 +266,6 @@ RSpec.configure do |config|
   end
 end
 ```
-
-**Skip retries for known flaky tests:**
-```ruby
-RSpec.configure do |config|
-  config.max_retries = 10
-  
-  # Load known flaky specs from external tracking system
-  FLAKY_SPECS ||= RSpec::Flakes.flaky_specs
-  
-  # Only retry system tests with JS in CI
-  config.around :each, type: :system, js: true do |ex|
-    ex.run_with_retry retry: 2
-  end if ENV['CI']
-  
-  # Skip retries for tests that are known to be flaky
-  # This prevents wasting time on tests that fail due to known issues
-  config.skip_retry_if = proc do |example|
-    metadata = example.metadata
-    
-    # Check if this test matches any known flaky spec
-    FLAKY_SPECS.any? do |flaky_spec|
-      metadata[:file_path].include?(flaky_spec['file']) &&
-        example.full_description == flaky_spec['test_name']
-    end
-  end
-  
-  config.retry_callback = ->(ex) { Capybara.reset! if ex.metadata[:js] }
-end
-```
-
-**Simple flaky test marking (without external system):**
-```ruby
-RSpec.configure do |config|
-  # Skip retries for manually marked flaky tests
-  config.skip_retry_if = proc do |example|
-    example.metadata[:flaky] == true
-  end
-end
-
-# Mark specific tests as flaky
-it 'processes payment', :retry => 3, :flaky => true do
-  # This test won't retry even though retry: 3 is set
-  # because it's marked as flaky
-end
-
-it 'stable test', :retry => 3 do  
-  # This test will retry normally
-end
-```
-
-These approaches are particularly useful when:
-- You have a flaky test tracking system that identifies problematic tests
-- You want to retry legitimate failures but not waste time on known flaky tests
-- You need to balance test reliability with build time efficiency
-- You want to temporarily disable retries for specific problematic tests
 
 ### Calling `run_with_retry` programmatically
 
