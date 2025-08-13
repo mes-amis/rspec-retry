@@ -1,4 +1,4 @@
-# RSpec::Retry ![CI](https://github.com/monami-ya/rspec-retry/actions/workflows/ci.yml/badge.svg?branch=main)
+# RSpec::Retry ![CI](https://github.com/mes-amis/rspec-retry/actions/workflows/ci.yml/badge.svg?branch=main)
 
 RSpec::Retry adds a `:retry` option for intermittently failing rspec examples.
 If an example has the `:retry` option, rspec will retry the example the
