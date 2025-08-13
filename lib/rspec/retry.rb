@@ -20,6 +20,7 @@ module RSpec
         config.add_setting :clear_lets_on_failure, :default => true
         config.add_setting :display_try_failure_messages, :default => false
         config.add_setting :max_retries, :default => false
+        config.add_setting :skip_retry_if, :default => nil
 
         # retry based on example metadata
         config.add_setting :retry_count_condition, :default => ->(_) { nil }
@@ -74,6 +75,14 @@ module RSpec
           1
       ].max
       
+      # Check if we should skip retry based on skip_retry_if proc
+      skip_retry_if = RSpec.configuration.skip_retry_if
+      if skip_retry_if.is_a?(Proc) && original_count > 1
+        if skip_retry_if.call(current_example)
+          return 1  # Skip retries for this example
+        end
+      end
+
       # Check if we've hit the global max_retries limit
       max_retries = RSpec.configuration.max_retries
       if max_retries.is_a?(Integer) && original_count > 1

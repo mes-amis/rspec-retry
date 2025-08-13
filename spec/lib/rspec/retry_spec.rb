@@ -504,4 +504,181 @@ describe RSpec::Retry do
       end
     end
   end
+
+  describe 'skip_retry_if configuration' do
+    after(:all) do
+      RSpec.configuration.skip_retry_if = nil  # reset to default
+    end
+
+    context 'when skip_retry_if proc returns true' do
+      it 'should skip retries for matching examples' do
+        attempt_counts = []
+        
+        # Configure to skip retry for examples containing "skip" in description
+        RSpec.configuration.skip_retry_if = proc do |example|
+          example.description.include?('skip')
+        end
+
+        example_group = RSpec.describe 'SkipRetryIfTest' do
+          around do |example|
+            example.run_with_retry
+            attempt_counts << example.attempts
+          end
+
+          it 'normal example should retry', retry: 3 do
+            raise 'failure'
+          end
+
+          it 'skip retry example should not retry', retry: 3 do
+            raise 'failure'
+          end
+        end
+        
+        example_group.run
+        
+        # First example should retry fully, second should not retry at all
+        expect(attempt_counts).to eq([3, 1])
+      end
+    end
+
+    context 'when skip_retry_if proc returns false' do
+      it 'should allow retries for all examples' do
+        attempt_counts = []
+        
+        # Configure to never skip retry
+        RSpec.configuration.skip_retry_if = proc do |example|
+          false
+        end
+
+        example_group = RSpec.describe 'NoSkipRetryIfTest' do
+          around do |example|
+            example.run_with_retry
+            attempt_counts << example.attempts
+          end
+
+          it 'first example', retry: 2 do
+            raise 'failure'
+          end
+
+          it 'second example', retry: 2 do
+            raise 'failure'
+          end
+        end
+        
+        example_group.run
+        
+        # Both examples should retry fully
+        expect(attempt_counts).to eq([2, 2])
+      end
+    end
+
+    context 'when skip_retry_if is nil' do
+      it 'should not affect retry behavior' do
+        RSpec.configuration.skip_retry_if = nil
+        attempt_counts = []
+
+        example_group = RSpec.describe 'NilSkipRetryIfTest' do
+          around do |example|
+            example.run_with_retry
+            attempt_counts << example.attempts
+          end
+
+          it 'example should retry normally', retry: 2 do
+            raise 'failure'
+          end
+        end
+        
+        example_group.run
+        
+        # Example should retry normally
+        expect(attempt_counts).to eq([2])
+      end
+    end
+
+    context 'with complex skip conditions' do
+      it 'should support complex example matching' do
+        attempt_counts = []
+        
+        # Skip retry if example has specific metadata or description pattern
+        RSpec.configuration.skip_retry_if = proc do |example|
+          example.metadata[:no_retry] == true ||
+          example.description.match?(/integration/)
+        end
+
+        example_group = RSpec.describe 'ComplexSkipRetryIfTest' do
+          around do |example|
+            example.run_with_retry
+            attempt_counts << example.attempts
+          end
+
+          it 'unit test should retry', retry: 2 do
+            raise 'failure'
+          end
+
+          it 'integration test should not retry', retry: 2 do
+            raise 'failure'
+          end
+
+          it 'marked no retry should not retry', retry: 2, no_retry: true do
+            raise 'failure'
+          end
+        end
+        
+        example_group.run
+        
+        # First example retries, second and third don't
+        expect(attempt_counts).to eq([2, 1, 1])
+      end
+    end
+
+    context 'default skip_retry_if value' do
+      it 'should have a default value of nil' do
+        # Reset to default
+        RSpec.configure { |config| config.skip_retry_if = nil }
+        expect(RSpec.configuration.skip_retry_if).to be_nil
+      end
+    end
+
+    context 'interaction with max_retries' do
+      it 'should work together with max_retries' do
+        attempt_counts = []
+        
+        # Set max_retries to 1 and skip_retry_if for examples containing "skip"
+        RSpec.configuration.max_retries = 1
+        RSpec.configuration.skip_retry_if = proc do |example|
+          example.description.include?('skip')
+        end
+
+        example_group = RSpec.describe 'MaxRetriesAndSkipTest' do
+          around do |example|
+            example.run_with_retry
+            attempt_counts << example.attempts
+          end
+
+          it 'first normal example should retry', retry: 3 do
+            raise 'failure'
+          end
+
+          it 'skip example should not retry', retry: 3 do
+            raise 'failure'
+          end
+
+          it 'second normal example should not retry due to max_retries', retry: 3 do
+            raise 'failure'
+          end
+        end
+        
+        example_group.run
+        
+        # First example retries (counts towards max_retries), 
+        # second skipped by skip_retry_if,
+        # third blocked by max_retries limit
+        expect(attempt_counts).to eq([3, 1, 1])
+        
+        # Clean up
+        RSpec.configuration.max_retries = false
+        RSpec.configuration.skip_retry_if = nil
+      end
+    end
+  end
 end
